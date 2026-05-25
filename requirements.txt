@@ -1,0 +1,46 @@
+# =============================================================================
+# FX Toolkit — unified dependencies
+# Union of the three source projects (fx_vol_history, fx_levels_monitor,
+# fx-strategy-app). Versions take the most permissive lower bound across
+# projects.
+# =============================================================================
+
+# Core — required by every page
+streamlit>=1.36
+pandas>=2.0
+numpy>=1.24
+plotly>=5.18
+
+# Numerical / pricing — used by Vol Dashboard, EKO Pricer, RKO Pricer
+#   scipy.optimize.brentq, scipy.optimize.minimize_scalar — strike/KO solvers
+#   scipy.stats.norm                                       — BS / GK pricing
+#   scipy.stats.chi2, scipy.stats.gaussian_kde             — confidence ellipses, KDE
+scipy>=1.11
+
+# Statistical learning — sklearn.mixture.GaussianMixture, used by various
+# regime / clustering helpers in core/
+scikit-learn>=1.3
+
+# Cointegration & time-series stats — statsmodels.tsa.stattools.coint,
+# used by Currency Pair Analyzer (Engle-Granger test on log-spreads).
+statsmodels>=0.14
+
+# Excel export
+openpyxl>=3.1.0
+
+# =============================================================================
+# OPTIONAL — Hidden Markov Models (regime gating in the EKO Pricer)
+# =============================================================================
+# Powers:
+#   - hmm_dominant + hmm_state_X gates in EKO Pricer backtests
+#   - Per-pair regime panels loaded from <data_folder>/regimes/*.csv
+#
+# WITHOUT hmmlearn: the regime gates simply do nothing; everything else
+# works normally.
+#
+# INSTALLATION: hmmlearn is a C++ extension with prebuilt wheels for
+# Python 3.10 – 3.13. On 3.14+ pip builds from source (needs a clang++
+# toolchain). If you hit a build error: drop to Python 3.13, install
+# Xcode Command Line Tools, or comment this line out.
+hmmlearn>=0.3
+holidays>=0.50
