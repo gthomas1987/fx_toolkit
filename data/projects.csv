@@ -1,0 +1,8 @@
+id,title,description,type,priority,status,date_requested,due_date,est_hours,actual_hours,progress_pct,notes,related_page,created_at,updated_at
+77d9ffc6a0b0,Get accurate 3 month 25D call and 25% digi call,Could be different due to skew. Fix and extend to other maturities/delta,Ad-hoc,Urgent,In Progress,2026-05-30,2026-07-31,10.0,20.0,29.0,,,2026-05-30,2026-05-30
+2c2a21d3eb1a,Realized correlation matrix across major FX pairs and Equity indices,,Ad-hoc,Med,Backlog,2026-05-30,,20.0,0.0,31.0,,,2026-05-30,2026-05-30
+8d07d9334679,Calculate implied correlation for EUR and JPY through EURXXX and XXXJPY implied vol,,Ad-hoc,Med,Backlog,2026-05-30,,20.0,0.0,0.0,,,2026-05-30,2026-05-30
+08ab244db1da,"Investigate ways to auto-classify assets into ""Rangey"" or ""Trendy"" for last 6-12 months",,Ad-hoc,Med,Backlog,2026-05-30,,30.0,0.0,0.0,,,2026-05-30,2026-05-30
+6f15af121068,Study https://en.macromicro.me,,Ad-hoc,Med,Backlog,2026-05-30,,30.0,0.0,0.0,,,2026-05-30,2026-05-30
+040069b18a85,Dashboard to do Cluster Analysis on  two currency pairs,,Ad-hoc,Med,Review,2026-05-30,,50.0,0.0,0.0,,,2026-05-30,2026-05-30
+34fef3b4ad34,Replicate FXpresso,,Ad-hoc,Med,Backlog,2026-05-30,,50.0,0.0,0.0,,,2026-05-30,2026-05-30

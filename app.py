@@ -20,18 +20,25 @@ if str(ROOT) not in sys.path:
 
 import streamlit as st
 
-from shared.pages import LIVE_PAGES
+from shared.pages import pages_by_section
 
 
-def _build_pages() -> list[st.Page]:
-    pages: list[st.Page] = [
-        st.Page("home.py", title="Home", icon="🏠", default=True),
-    ]
-    pages.extend(
-        st.Page(p.path, title=p.title, icon=p.icon)
-        for p in LIVE_PAGES
-    )
-    return pages
+def _build_pages() -> dict[str, list[st.Page]]:
+    """Build the navigation dict for st.navigation.
+
+    Keys become sidebar section headers. The Home page sits at the
+    top under a blank-string key, which Streamlit renders without a
+    header so it reads as the "go-here-first" page.
+    """
+    nav: dict[str, list[st.Page]] = {
+        "": [st.Page("home.py", title="Home", icon="🏠", default=True)],
+    }
+    for section_name, pages in pages_by_section().items():
+        nav[section_name] = [
+            st.Page(p.path, title=p.title, icon=p.icon)
+            for p in pages
+        ]
+    return nav
 
 
 nav = st.navigation(_build_pages(), position="sidebar")

@@ -11,10 +11,26 @@ Schema:
     icon      : sidebar icon (emoji)
     card_tag  : small uppercase tag on the landing card
     card_body : one-paragraph description on the landing card
+    section   : grouping label — drives sidebar section headers via
+                st.navigation(dict) and the section blocks on home.py.
+                Must be one of the values in SECTIONS below.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+
+# Section ordering — used by both the sidebar nav and the landing
+# page. Order here = display order. Adding a new section is just a
+# matter of adding it to this tuple and setting `section=` on the
+# PageInfo. Sections with zero pages are automatically hidden.
+SECTIONS = (
+    "Portfolio",
+    "Dashboards",
+    "Pricers",
+    "Backtest",
+    "Workflow",
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +40,7 @@ class PageInfo:
     icon: str
     card_tag: str
     card_body: str
+    section: str = "Tools"
 
 
 PORTFOLIO_ANALYZER = PageInfo(
@@ -36,6 +53,7 @@ PORTFOLIO_ANALYZER = PageInfo(
         "correlation exposure, and multi-axis scenario cubes across a "
         "portfolio of vanillas, call spreads, flys, EKOs, and dual EKOs."
     ),
+    section="Portfolio",
 )
 
 VOL_DASHBOARD = PageInfo(
@@ -47,6 +65,7 @@ VOL_DASHBOARD = PageInfo(
         "Normalised smile across tenors, ATM percentile bands, term "
         "structure, and an alerts grid for vol-surface extremes."
     ),
+    section="Dashboards",
 )
 
 EKO_PRICER = PageInfo(
@@ -58,6 +77,7 @@ EKO_PRICER = PageInfo(
         "Single-trade pricing, daily-rolling backtest, worst-of EKOs, "
         "and basket portfolios across delta · tenor · pair grids."
     ),
+    section="Pricers",
 )
 
 RKO_PRICER = PageInfo(
@@ -70,6 +90,7 @@ RKO_PRICER = PageInfo(
         "Crank–Nicolson PDE, and a daily-OHLC backtest of continuously"
         "-monitored barriers."
     ),
+    section="Pricers",
 )
 
 CURRENCY_SCREENER = PageInfo(
@@ -83,6 +104,7 @@ CURRENCY_SCREENER = PageInfo(
         "candidates: cointegration tests, variance ratios, rolling ρ "
         "term structure, and per-pair drill-downs."
     ),
+    section="Dashboards",
 )
 
 JOINT_PAIR_ANALYZER = PageInfo(
@@ -96,6 +118,7 @@ JOINT_PAIR_ANALYZER = PageInfo(
         "HMM dynamics for sojourn times, and Mahalanobis ellipses for "
         "barrier placement guidance."
     ),
+    section="Dashboards",
 )
 
 BACKTEST_VIEWER = PageInfo(
@@ -108,6 +131,7 @@ BACKTEST_VIEWER = PageInfo(
         "variants) and renders summary cards, drilldowns, comparison "
         "heatmaps, and printable PDF reports."
     ),
+    section="Backtest",
 )
 
 OPTION_PRICER = PageInfo(
@@ -122,6 +146,7 @@ OPTION_PRICER = PageInfo(
         "pricing model per leg, see live Greeks and a USD-summed "
         "strategy total."
     ),
+    section="Pricers",
 )
 
 DUAL_CCY_PRICER = PageInfo(
@@ -136,6 +161,7 @@ DUAL_CCY_PRICER = PageInfo(
         "engines, per-leg Greeks, ∂V/∂ρ, and survival-probability "
         "breakdowns."
     ),
+    section="Pricers",
 )
 
 OPTION_PORTFOLIO_BACKTEST = PageInfo(
@@ -151,13 +177,25 @@ OPTION_PORTFOLIO_BACKTEST = PageInfo(
         "strategy / per-pair / per-type with Sharpe, MDD, win-rate, "
         "skew, and drawdown attribution."
     ),
+    section="Backtest",
 )
 
-# Order = navigation order = landing-card order.
-# Portfolio first (live book monitoring is the highest-frequency use
-# case). Currency Screener → Joint Pair Analyzer → Backtest Viewer
-# sits at the end, mirroring the discovery → analysis → backtest →
-# review workflow.
+PROJECT_MANAGEMENT = PageInfo(
+    path="pages/project_management.py",
+    title="Project Management",
+    icon="📋",
+    card_tag="PM work tracker",
+    card_body=(
+        "Kanban board for projects assigned by the PM — status, "
+        "priority, due dates, hours estimated vs. spent. CSV-backed "
+        "at data/projects.csv so anything with file access can edit."
+    ),
+    section="Workflow",
+)
+
+# Order = section order, then within each section in the sequence
+# below. The pages_by_section() helper preserves this ordering when
+# grouping for the sidebar nav and the landing-page card sections.
 #
 # Note: EKO_PRICER and RKO_PRICER are intentionally NOT in this tuple.
 # The pages remain on disk for reference and are easy to re-enable by
@@ -167,12 +205,40 @@ OPTION_PORTFOLIO_BACKTEST = PageInfo(
 #   - Option Portfolio Backtest    basket / multi-strategy (done)
 #   - Option Backtest              single-strategy drill-down (next)
 LIVE_PAGES = (
+    # Portfolio
     PORTFOLIO_ANALYZER,
+    # Dashboards
     VOL_DASHBOARD,
-    OPTION_PRICER,
-    DUAL_CCY_PRICER,
-    OPTION_PORTFOLIO_BACKTEST,
     CURRENCY_SCREENER,
     JOINT_PAIR_ANALYZER,
+    # Pricers
+    OPTION_PRICER,
+    DUAL_CCY_PRICER,
+    # Backtest
+    OPTION_PORTFOLIO_BACKTEST,
     BACKTEST_VIEWER,
+    # Workflow
+    PROJECT_MANAGEMENT,
 )
+
+
+def pages_by_section() -> dict[str, tuple[PageInfo, ...]]:
+    """Group LIVE_PAGES by `section`, preserving SECTIONS ordering.
+
+    Sections with zero pages are omitted. Pages whose `section` is not
+    listed in SECTIONS get appended at the end under their own bucket,
+    so a typo in `section=` is visible rather than silently swallowed.
+    """
+    buckets: dict[str, list[PageInfo]] = {s: [] for s in SECTIONS}
+    extras: dict[str, list[PageInfo]] = {}
+    for page in LIVE_PAGES:
+        if page.section in buckets:
+            buckets[page.section].append(page)
+        else:
+            extras.setdefault(page.section, []).append(page)
+    result: dict[str, tuple[PageInfo, ...]] = {
+        s: tuple(pages) for s, pages in buckets.items() if pages
+    }
+    for s, pages in extras.items():
+        result[s] = tuple(pages)
+    return result

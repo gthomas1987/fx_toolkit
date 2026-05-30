@@ -222,9 +222,12 @@ available_tenors_per_cat = {
 # -----------------------------------------------------------------------------
 # Tabs (Skew is the new landing tab — first position)
 # -----------------------------------------------------------------------------
-tab_skew, tab_iv, tab_heat, tab_alerts = st.tabs(
-    ["📊 Skew", "📈 Implied Vol", "🌡️ Heatmap", "🚨 Alerts"]
-)
+(tab_skew, tab_iv, tab_heat, tab_alerts,
+ tab_vol3m, tab_carry, tab_dnt, tab_binary) = st.tabs([
+    "📊 Skew", "📈 Implied Vol", "🌡️ Heatmap", "🚨 Alerts",
+    "🎯 3m Vol Screen", "💰 Static Carry",
+    "🚫 DNT", "🎲 Binary 10:1",
+])
 
 
 # ============================================================================
@@ -1128,6 +1131,1082 @@ with tab_alerts:
             f"covers forward points and calendar spreads, see the "
             f"standalone `apps/alerts.py` app."
         )
+
+
+
+
+
+# ============================================================================
+# TAB 4 — 3m Vol Screen — Goldman 'Best 3m Vol Screen' (image 6)
+# ============================================================================
+# SCOPE: Multi-pair scan — ignores the sidebar pair selector for the
+# table/scatter (shows every USD pair we have 3m ATM vol for). The
+# sidebar pair is used only as the *default drill-down* below.
+#
+# Layout:
+#   1. Summary metrics row (pairs scanned, cheap vs rich counts)
+#   2. Sortable table: Cross | 3m Implied | 3m Realized | Diff |
+#      2y Low | 2y High | Percentile. Diff cells coloured green
+#      (cheap implied vs realized → candidate BUY) / red (rich →
+#      candidate SELL). Percentile cells heat-mapped 0..100.
+#   3. Scatter: percentile of current implied (x) vs Diff (y) —
+#      same framing as Goldman's 'Entry Point vs Richness' chart.
+#   4. Drill-down: pair dropdown (defaults to sidebar pair) → time
+#      series of 3m Implied vs 3m Realized over the lookback window.
+with tab_vol3m:
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    from core.screens import (scan_3m_vol, scan_3m_vol_history,
+                                ASIA_EM_PAIRS)
+
+    @st.cache_data(show_spinner="Scanning 3m vols…")
+    def _scan_3m_vol_cached(folder: str,
+                            pairs: tuple[str, ...],
+                            prefer_em: str) -> pd.DataFrame:
+        return scan_3m_vol(folder, pairs, lookback_years=2,
+                            prefer_em=prefer_em)
+
+    @st.cache_data(show_spinner="Loading vol history…")
+    def _scan_3m_vol_history_cached(folder: str,
+                                     pair: str,
+                                     prefer_em: str) -> pd.DataFrame:
+        return scan_3m_vol_history(folder, pair, prefer_em=prefer_em)
+
+    # All pairs with 3m ATM vol data. `list_available_pairs` is the
+    # same helper the sidebar uses to populate the pair selector.
+    all_vol_pairs = sorted(list_available_pairs(folder, "VOL_ATM"))
+    if not all_vol_pairs:
+        st.warning("No VOL_ATM data available in `_index.csv`.")
+    else:
+        # Use the sidebar's onshore/offshore choice as the EM default
+        # (it's only set when an Asia EM pair is selected).
+        em_pref = prefer if asia_em else "offshore"
+        df_scan = _scan_3m_vol_cached(folder, tuple(all_vol_pairs), em_pref)
+
+        if df_scan.empty:
+            st.warning("Couldn't build the screen — no usable data.")
+        else:
+            # ---- Header
+            st.markdown(
+                f"**3m Vol Screen**  ·  Implied vs Realized across "
+                f"**{len(df_scan)}** pair(s)  ·  EM preference: "
+                f"**{em_pref}**"
+            )
+
+            n_cheap = int((df_scan["Diff"] < 0).sum())
+            n_rich = int((df_scan["Diff"] > 0).sum())
+            n_low_pct = int((df_scan["Percentile"] < 25).sum())
+            n_high_pct = int((df_scan["Percentile"] > 75).sum())
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Pairs scanned", f"{len(df_scan)}")
+            m2.metric("Implied < Realized", f"{n_cheap}",
+                          help="Candidates to BUY vol")
+            m3.metric("Implied > Realized", f"{n_rich}",
+                          help="Candidates to SELL vol")
+            m4.metric("Pct < 25  /  > 75",
+                          f"{n_low_pct}  /  {n_high_pct}")
+
+            # ---- Table
+            st.markdown("##### Best 3m Vol Screen")
+            st.caption(
+                "Diff = 3m Implied − 3m Realized (% vol points). "
+                "**Green** Diff = implied is cheap vs realized → buy "
+                "candidate; **red** = implied is rich → sell candidate. "
+                "Percentile is current implied vs trailing-2y history "
+                "of implied. Sorted ascending by Diff (biggest "
+                "buy candidates on top)."
+            )
+
+            def _style_diff(v):
+                """Green for negative (cheap), red for positive (rich).
+                Saturation scales with |v| capped at 5 vol points."""
+                if pd.isna(v):
+                    return ""
+                t = min(1.0, abs(float(v)) / 5.0)
+                if v < 0:
+                    g = int(220 + (160 - 220) * t)
+                    return (f"background-color: rgb(180, {g+40}, 180); "
+                            "color: #1a1a1a; text-align: right;")
+                else:
+                    r = int(255 + (220 - 255) * t)
+                    return (f"background-color: rgb({r}, {180-int(t*40)},"
+                            f" {180-int(t*40)}); color: #1a1a1a; "
+                            "text-align: right;")
+
+            def _style_pct(v):
+                """Red→Yellow→Green on fixed 0..100 scale."""
+                if pd.isna(v):
+                    return "text-align: center;"
+                t = max(0.0, min(1.0, float(v) / 100.0))
+                if t < 0.5:
+                    x = t / 0.5
+                    r = int(220 + (255 - 220) * x)
+                    g = int(80 + (220 - 80) * x)
+                    b = int(80 + (130 - 80) * x)
+                else:
+                    x = (t - 0.5) / 0.5
+                    r = int(255 + (90 - 255) * x)
+                    g = int(220 + (180 - 220) * x)
+                    b = int(130 + (90 - 130) * x)
+                return (f"background-color: rgb({r},{g},{b}); "
+                        "color: #1a1a1a; text-align: center; "
+                        "font-weight: 600;")
+
+            styled = (df_scan.style
+                        .format({
+                            "3m Implied": "{:.1f}",
+                            "3m Realized": "{:.1f}",
+                            "Diff": "{:+.1f}",
+                            "2y Low": "{:.1f}",
+                            "2y High": "{:.1f}",
+                            "Percentile": "{:.0f}",
+                        }, na_rep="—")
+                        .map(_style_diff, subset=["Diff"])
+                        .map(_style_pct, subset=["Percentile"])
+                        .set_table_styles([
+                            {"selector": "th",
+                                "props": [("text-align", "center"),
+                                          ("font-weight", "600")]},
+                        ]))
+            st.dataframe(styled, use_container_width=True,
+                            hide_index=True, height=min(560, 38 * (len(df_scan) + 1)))
+
+            # ---- Scatter: Entry Point vs Richness
+            st.markdown("---")
+            st.markdown("##### Entry Point vs Richness")
+            st.caption(
+                "X-axis: percentile of current 3m implied in its 2y "
+                "history (low = cheap entry). Y-axis: Implied − "
+                "Realized (positive = implied trading rich vs delivered, "
+                "expensive to buy). **Lower-left** corner is the sweet "
+                "spot for buying vol; **upper-right** for selling vol."
+            )
+            df_scatter = df_scan.copy().dropna(
+                subset=["Percentile", "Diff"])
+            df_scatter["Region"] = df_scatter["Cross"].map(
+                lambda c: "EM Asia" if c in ASIA_EM_PAIRS else "G10"
+            )
+            fig_sc = px.scatter(
+                df_scatter,
+                x="Percentile", y="Diff",
+                color="Region", text="Cross",
+                hover_data={
+                    "3m Implied": ":.1f",
+                    "3m Realized": ":.1f",
+                    "Diff": ":+.1f",
+                    "Percentile": ":.0f",
+                    "Region": False,
+                },
+                color_discrete_map={"G10": "#1f77b4",
+                                       "EM Asia": "#2ca02c"},
+                height=460,
+            )
+            fig_sc.update_traces(textposition="top center",
+                                    marker=dict(size=11,
+                                                line=dict(width=0.5,
+                                                            color="#333")))
+            fig_sc.add_hline(y=0, line_dash="dash",
+                                line_color="#888", opacity=0.5)
+            fig_sc.add_vline(x=50, line_dash="dot",
+                                line_color="#aaa", opacity=0.4)
+            fig_sc.update_layout(
+                xaxis_title="Percentile of current 3m implied (2y)",
+                yaxis_title="Implied − Realized (vol pts)",
+                margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom",
+                                y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_sc, use_container_width=True)
+
+            # ---- Drill-down: one pair, history
+            st.markdown("---")
+            st.markdown(
+                "##### Drill-down — 3m Implied vs Realized history")
+
+            scan_pairs = df_scan["Cross"].tolist()
+            default_idx = (scan_pairs.index(pair)
+                              if pair in scan_pairs else 0)
+            drill_pair = st.selectbox(
+                "Pair", scan_pairs, index=default_idx,
+                key="vol3m_drill_pair",
+            )
+
+            hist = _scan_3m_vol_history_cached(
+                folder, drill_pair, em_pref)
+            if hist.empty:
+                st.warning(f"No history for {drill_pair}.")
+            else:
+                # Apply sidebar lookback for chart x-range
+                if lookback_days is None:
+                    hist_disp = hist
+                else:
+                    cutoff = (hist.index[-1]
+                                 - pd.Timedelta(days=lookback_days))
+                    hist_disp = hist[hist.index >= cutoff]
+
+                cur_imp = hist["3m Implied"].dropna().iloc[-1]
+                cur_rv_series = hist["3m Realized"].dropna()
+                cur_rv = (cur_rv_series.iloc[-1]
+                              if not cur_rv_series.empty else float("nan"))
+
+                fig_h = go.Figure()
+                fig_h.add_trace(go.Scatter(
+                    x=hist_disp.index,
+                    y=hist_disp["3m Implied"],
+                    mode="lines", name="3m Implied",
+                    line=dict(color="#d62728", width=2),
+                    hovertemplate=("%{x|%Y-%m-%d}<br>"
+                                       "Implied: %{y:.2f}%<extra></extra>"),
+                ))
+                fig_h.add_trace(go.Scatter(
+                    x=hist_disp.index,
+                    y=hist_disp["3m Realized"],
+                    mode="lines", name="3m Realized (63-day)",
+                    line=dict(color="#1f77b4", width=2),
+                    hovertemplate=("%{x|%Y-%m-%d}<br>"
+                                       "Realized: %{y:.2f}%<extra></extra>"),
+                ))
+                title = (f"{drill_pair}  ·  current implied "
+                            f"{cur_imp:.1f}%  ·  current realized "
+                            f"{cur_rv:.1f}%  ·  trailing {lookback_label}")
+                fig_h.update_layout(
+                    title=title,
+                    xaxis_title="", yaxis_title="Vol (%)",
+                    height=380,
+                    margin=dict(l=10, r=10, t=50, b=10),
+                    legend=dict(orientation="h", yanchor="bottom",
+                                    y=1.02, xanchor="right", x=1),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig_h, use_container_width=True)
+
+            # ---- Download
+            st.markdown("---")
+            csv_bytes = df_scan.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇  Download screen (CSV)",
+                data=csv_bytes,
+                file_name=f"3m_vol_screen_{pd.Timestamp.today().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="vol3m_download",
+            )
+
+
+
+
+# ============================================================================
+# TAB 5 — Static Carry — Goldman 'Best Carry Screen' (image 5)
+# ============================================================================
+# SCOPE: Multi-pair scan. The structure is an ATMF/ATMS put spread
+# (e.g. buy 1 ATMF put, sell 1 ATMS put) — for a "Long" trade we'd
+# reverse to a call spread, but the static-carry ratio is symmetric.
+#
+# Static carry = |F - S| / |Put_ATMF_FV - Put_ATMS_FV|, i.e. the
+# payoff at expiry assuming spot rolls to spot, divided by the premium
+# paid. Larger ratio = better risk-reward. Direction follows fwd vs
+# spot (which side is the high-yielder).
+#
+# Caveat vs Goldman: we use ATM vol only; they use the full smile.
+# Expect ratio differences of 0.1-0.4x for the same date. Ranking and
+# direction should agree closely though.
+with tab_carry:
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    from core.screens import (scan_static_carry, scan_static_carry_history,
+                                ASIA_EM_PAIRS)
+
+    @st.cache_data(show_spinner="Scanning static carry…")
+    def _scan_carry_cached(folder: str,
+                            pairs: tuple[str, ...],
+                            tenor: str,
+                            prefer_em: str) -> pd.DataFrame:
+        return scan_static_carry(folder, pairs, tenor=tenor,
+                                  prefer_em=prefer_em)
+
+    @st.cache_data(show_spinner="Loading carry history…")
+    def _carry_history_cached(folder: str,
+                               pair: str,
+                               tenor: str,
+                               prefer_em: str) -> pd.DataFrame:
+        return scan_static_carry_history(folder, pair, tenor=tenor,
+                                          prefer_em=prefer_em)
+
+    # Tenor selector — Goldman defaults to 3m. We expose 1M/3M/6M so
+    # users can compare short-dated vs longer-dated carry.
+    cc1, cc2 = st.columns([1, 3])
+    with cc1:
+        carry_tenor = st.selectbox(
+            "Tenor", ["1M", "3M", "6M"], index=1, key="carry_tenor",
+        )
+
+    all_pairs = sorted(list_available_pairs(folder, "VOL_ATM"))
+    if not all_pairs:
+        st.warning("No VOL_ATM data in `_index.csv`.")
+    else:
+        em_pref = prefer if asia_em else "offshore"
+        df_scan = _scan_carry_cached(folder, tuple(all_pairs),
+                                       carry_tenor, em_pref)
+
+        if df_scan.empty:
+            st.warning("Couldn't build the screen — no usable data.")
+        else:
+            st.markdown(
+                f"**Static Carry Screen**  ·  {carry_tenor} ATMF/ATMS "
+                f"put-spread  ·  **{len(df_scan)}** pair(s)  ·  EM "
+                f"preference: **{em_pref}**"
+            )
+            st.caption(
+                "Static Carry = |F − S| / |Put_ATMF − Put_ATMS| "
+                "(forward values). Higher = better static "
+                "risk-reward. Direction follows fwd vs spot. 1m Return "
+                "is the smoothed return of the **non-USD currency** "
+                "(positive = appreciated). Goldman uses the full vol "
+                "smile; we use ATM only, so ratios may differ by "
+                "~0.1-0.4x but rankings should align."
+            )
+
+            n_long = int((df_scan["Direction"] == "Long").sum())
+            n_short = int((df_scan["Direction"] == "Short").sum())
+            top_ratio = (float(df_scan["Static Carry"].iloc[0])
+                            if not df_scan.empty else float("nan"))
+            top_pair = (df_scan["Pair"].iloc[0]
+                            if not df_scan.empty else "—")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Pairs scanned", f"{len(df_scan)}")
+            m2.metric("Long carry trades", f"{n_long}")
+            m3.metric("Short carry trades", f"{n_short}")
+            m4.metric("Top ratio", f"{top_ratio:.2f}x", top_pair)
+
+            # ---- Table
+            def _style_carry(v):
+                """Green-saturating for high ratios; red for low."""
+                if pd.isna(v):
+                    return ""
+                t = max(0.0, min(1.0, (float(v) - 0.5) / 2.5))
+                if t > 0.5:
+                    x = (t - 0.5) / 0.5
+                    r = int(220 + (40 - 220) * x)
+                    g = int(255 + (160 - 255) * x)
+                    b = int(220 + (40 - 220) * x)
+                else:
+                    x = t / 0.5
+                    r = int(255 + (220 - 255) * x)
+                    g = int(200 + (255 - 200) * x)
+                    b = int(200 + (220 - 200) * x)
+                return (f"background-color: rgb({r},{g},{b}); "
+                        "color: #1a1a1a; text-align: right; "
+                        "font-weight: 600;")
+
+            def _style_dir(v):
+                if v == "Long":
+                    return ("background-color: rgba(31, 119, 180, 0.20); "
+                              "text-align: center; font-weight: 600;")
+                elif v == "Short":
+                    return ("background-color: rgba(214, 39, 40, 0.20); "
+                              "text-align: center; font-weight: 600;")
+                return "text-align: center;"
+
+            def _style_ret(v):
+                if pd.isna(v):
+                    return "text-align: right;"
+                if v > 0:
+                    return "color: #2ca02c; text-align: right;"
+                if v < 0:
+                    return "color: #d62728; text-align: right;"
+                return "text-align: right;"
+
+            # Per-pair Spot/Forward format — JPY/IDR/KRW/HUF need
+            # different precision than EURUSD/GBPUSD
+            def _fmt_px(v, pair):
+                if pd.isna(v):
+                    return "—"
+                if pair in ("USDJPY", "USDKRW", "USDHUF"):
+                    return f"{v:,.2f}"
+                if pair == "USDIDR":
+                    return f"{v:,.0f}"
+                return f"{v:.4f}"
+
+            df_display = df_scan.copy()
+            df_display["Spot"] = df_display.apply(
+                lambda r: _fmt_px(r["Spot"], r["Pair"]), axis=1)
+            df_display["Forward"] = df_display.apply(
+                lambda r: _fmt_px(r["Forward"], r["Pair"]), axis=1)
+
+            styled = (df_display.style
+                        .format({
+                            "Implied Vol": "{:.1f}",
+                            "Static Carry": "{:.2f}x",
+                            "1m Return": "{:+.1f}%",
+                        }, na_rep="—")
+                        .map(_style_carry, subset=["Static Carry"])
+                        .map(_style_dir, subset=["Direction"])
+                        .map(_style_ret, subset=["1m Return"])
+                        .set_table_styles([
+                            {"selector": "th",
+                                "props": [("text-align", "center"),
+                                          ("font-weight", "600")]},
+                        ]))
+            st.dataframe(styled, use_container_width=True,
+                            hide_index=True,
+                            height=min(560, 38 * (len(df_scan) + 1)))
+
+            # ---- Scatter: carry vs spot return (Goldman's right-hand
+            # panel of the screen)
+            st.markdown("---")
+            st.markdown("##### Static Carry vs 1m Spot Return")
+            st.caption(
+                "X-axis: static-carry ratio. Y-axis: smoothed 1m return "
+                "of the non-USD currency. **Upper-right** = high static "
+                "payoff plus recent appreciation (momentum + carry "
+                "aligned). **Lower-right** = high carry but currency "
+                "weakened recently (carry trade with adverse spot "
+                "momentum)."
+            )
+            df_sc = df_scan.copy().dropna(
+                subset=["Static Carry", "1m Return"])
+            df_sc["Region"] = df_sc["Pair"].map(
+                lambda c: "EM Asia" if c in ASIA_EM_PAIRS else "G10"
+            )
+            fig_sc = px.scatter(
+                df_sc,
+                x="Static Carry", y="1m Return",
+                color="Region", text="Pair", symbol="Direction",
+                hover_data={
+                    "Implied Vol": ":.1f",
+                    "Static Carry": ":.2f",
+                    "1m Return": ":+.2f",
+                    "Direction": True,
+                    "Region": False,
+                },
+                color_discrete_map={"G10": "#1f77b4",
+                                       "EM Asia": "#2ca02c"},
+                symbol_map={"Long": "circle",
+                              "Short": "triangle-down"},
+                height=460,
+            )
+            fig_sc.update_traces(
+                textposition="top center",
+                marker=dict(size=11,
+                              line=dict(width=0.5, color="#333")))
+            fig_sc.add_hline(y=0, line_dash="dash",
+                                line_color="#888", opacity=0.5)
+            fig_sc.update_layout(
+                xaxis_title="Static Carry ratio (x)",
+                yaxis_title="1m Spot Return (%, non-USD ccy)",
+                margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom",
+                                y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_sc, use_container_width=True)
+
+            # ---- Drill-down: history of carry ratio for one pair
+            st.markdown("---")
+            st.markdown(
+                "##### Drill-down — Static Carry history")
+
+            scan_pairs = df_scan["Pair"].tolist()
+            default_idx = (scan_pairs.index(pair)
+                              if pair in scan_pairs else 0)
+            drill_pair = st.selectbox(
+                "Pair", scan_pairs, index=default_idx,
+                key="carry_drill_pair",
+            )
+
+            hist = _carry_history_cached(folder, drill_pair,
+                                            carry_tenor, em_pref)
+            if hist.empty:
+                st.warning(f"No carry history for {drill_pair}.")
+            else:
+                if lookback_days is None:
+                    hist_disp = hist
+                else:
+                    cutoff = (hist.index[-1]
+                                 - pd.Timedelta(days=lookback_days))
+                    hist_disp = hist[hist.index >= cutoff]
+
+                ratio_s = hist["Static Carry"].dropna()
+                cur_ratio = (float(ratio_s.iloc[-1])
+                                if not ratio_s.empty else float("nan"))
+                pct = (float((ratio_s <= cur_ratio).sum())
+                          / float(len(ratio_s)) * 100.0
+                          if not ratio_s.empty else float("nan"))
+
+                fig_h = go.Figure()
+                fig_h.add_trace(go.Scatter(
+                    x=hist_disp.index,
+                    y=hist_disp["Static Carry"],
+                    mode="lines", name="Static Carry",
+                    line=dict(color="#d62728", width=2),
+                    hovertemplate=("%{x|%Y-%m-%d}<br>"
+                                       "Carry: %{y:.2f}x<extra></extra>"),
+                ))
+                # Reference: mean over the displayed window
+                if not hist_disp["Static Carry"].dropna().empty:
+                    mean_ratio = float(
+                        hist_disp["Static Carry"].dropna().mean())
+                    fig_h.add_hline(
+                        y=mean_ratio, line_dash="dash",
+                        line_color="#888",
+                        annotation_text=f"mean {mean_ratio:.2f}x",
+                        annotation_position="bottom right",
+                    )
+                title = (f"{drill_pair} {carry_tenor}  ·  current "
+                            f"{cur_ratio:.2f}x  ·  pct {pct:.0f}  ·  "
+                            f"trailing {lookback_label}")
+                fig_h.update_layout(
+                    title=title,
+                    xaxis_title="", yaxis_title="Static Carry (x)",
+                    height=380,
+                    margin=dict(l=10, r=10, t=50, b=10),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig_h, use_container_width=True)
+
+            # ---- Download
+            st.markdown("---")
+            csv_bytes = df_scan.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇  Download screen (CSV)",
+                data=csv_bytes,
+                file_name=(f"static_carry_{carry_tenor.lower()}_"
+                              f"{pd.Timestamp.today().strftime('%Y%m%d')}"
+                              ".csv"),
+                mime="text/csv",
+                key="carry_download",
+            )
+
+
+
+
+# ============================================================================
+# TAB 6 — DNT — Goldman 'Best DNT Screen' (image 3)
+# ============================================================================
+# SCOPE: Multi-pair scan. For each pair, construct a symmetric barrier
+# corridor around current spot (half-width = 1.2 × max excursion over
+# lookback window) and compute the THEORETICAL Black-Scholes survival
+# probability under continuous monitoring.
+#
+# Important caveat: Goldman backs out IMPLIED survival probability from
+# market DNT QUOTES. We compute the THEORETICAL probability under flat-
+# vol GBM with continuous monitoring. Market DNTs trade at a large
+# spread, so expect their numbers to be 3-5x higher than ours. Use this
+# screen to find pairs where the theoretical probability is LOW (range
+# is tight relative to vol) — those are the cleanest candidates to BUY
+# DNTs vs the market, modulo the market spread.
+with tab_dnt:
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    from core.screens import (scan_dnt, scan_dnt_history, ASIA_EM_PAIRS)
+
+    @st.cache_data(show_spinner="Scanning DNT corridors…")
+    def _scan_dnt_cached(folder: str,
+                          pairs: tuple[str, ...],
+                          tenor: str,
+                          lookback: int,
+                          widen_pct: float,
+                          prefer_em: str) -> pd.DataFrame:
+        return scan_dnt(folder, pairs, tenor=tenor,
+                          lookback_days=lookback,
+                          widen_pct=widen_pct,
+                          prefer_em=prefer_em)
+
+    @st.cache_data(show_spinner="Loading DNT history…")
+    def _dnt_history_cached(folder: str,
+                              pair: str,
+                              tenor: str,
+                              lookback: int,
+                              widen_pct: float,
+                              prefer_em: str) -> pd.DataFrame:
+        return scan_dnt_history(folder, pair, tenor=tenor,
+                                  lookback_days=lookback,
+                                  widen_pct=widen_pct,
+                                  prefer_em=prefer_em)
+
+    # Controls row — three knobs: tenor, range lookback, widening %
+    cc1, cc2, cc3 = st.columns([1, 1, 1])
+    with cc1:
+        dnt_tenor = st.selectbox(
+            "Tenor", ["1M", "3M", "6M"], index=1, key="dnt_tenor",
+        )
+    with cc2:
+        dnt_lookback = st.selectbox(
+            "Range lookback (BDays)",
+            options=[21, 42, 63, 126, 252],
+            index=2,
+            help="Window for computing max(|S_t − S_now|/S_now). "
+                  "Default 63 ≈ 3m, matching the DNT tenor.",
+            key="dnt_lookback",
+        )
+    with cc3:
+        dnt_widen = st.number_input(
+            "Widening %", min_value=0.0, max_value=100.0,
+            value=20.0, step=5.0,
+            help="Half-width = (1 + widening/100) × max recent excursion. "
+                  "Goldman uses 20%.",
+            key="dnt_widen",
+        )
+
+    all_pairs = sorted(list_available_pairs(folder, "VOL_ATM"))
+    if not all_pairs:
+        st.warning("No VOL_ATM data in `_index.csv`.")
+    else:
+        em_pref = prefer if asia_em else "offshore"
+        df_scan = _scan_dnt_cached(folder, tuple(all_pairs),
+                                     dnt_tenor, dnt_lookback,
+                                     float(dnt_widen), em_pref)
+
+        if df_scan.empty:
+            st.warning("Couldn't build the screen — no usable data.")
+        else:
+            st.markdown(
+                f"**DNT Screen**  ·  {dnt_tenor} double-no-touch  ·  "
+                f"range from {dnt_lookback}-BDay history × "
+                f"{dnt_widen:g}% widening  ·  **{len(df_scan)}** pair(s)"
+            )
+            st.warning(
+                "⚠️ Survival Prob is THEORETICAL Black-Scholes (continuous "
+                "monitoring, flat ATM vol, no drift). Goldman's published "
+                "screen backs out IMPLIED probability from market DNT "
+                "quotes — those will be 3-5× higher because DNTs trade at "
+                "wide spreads. Use this for ranking which corridors are "
+                "tight relative to vol, not as a direct price comparison."
+            )
+
+            mean_p = float(df_scan["Survival Prob"].mean())
+            n_low = int((df_scan["Survival Prob"] < 10).sum())
+            n_high = int((df_scan["Survival Prob"] > 50).sum())
+            tightest = (df_scan.iloc[0]["Cross"]
+                         if not df_scan.empty else "—")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Pairs scanned", f"{len(df_scan)}")
+            m2.metric("Mean survival prob", f"{mean_p:.1f}%")
+            m3.metric("Prob < 10%", f"{n_low}",
+                          help="Tightest corridors (most likely to KO)")
+            m4.metric("Tightest", tightest)
+
+            # ---- Table
+            st.markdown("##### Best DNT Screen")
+
+            def _style_prob(v):
+                """Green for low prob (tight corridor = KO likely);
+                red for high prob (wide corridor = unlikely to KO)."""
+                if pd.isna(v):
+                    return ""
+                t = max(0.0, min(1.0, float(v) / 100.0))
+                if t < 0.5:
+                    x = t / 0.5
+                    r = int(40 + (255 - 40) * x)
+                    g = int(160 + (220 - 160) * x)
+                    b = int(40 + (130 - 40) * x)
+                else:
+                    x = (t - 0.5) / 0.5
+                    r = int(255 + (220 - 255) * x)
+                    g = int(220 + (80 - 220) * x)
+                    b = int(130 + (80 - 130) * x)
+                return (f"background-color: rgb({r},{g},{b}); "
+                          "color: #1a1a1a; text-align: center; "
+                          "font-weight: 600;")
+
+            def _fmt_px_dnt(v, pair):
+                if pd.isna(v):
+                    return "—"
+                if pair in ("USDJPY", "USDKRW"):
+                    return f"{v:,.2f}"
+                if pair == "USDIDR":
+                    return f"{v:,.0f}"
+                return f"{v:.4f}"
+
+            df_display = df_scan.copy()
+            for col in ("Spot", "Lower KO", "Upper KO"):
+                df_display[col] = df_display.apply(
+                    lambda r, c=col: _fmt_px_dnt(r[c], r["Cross"]), axis=1)
+
+            styled = (df_display.style
+                        .format({
+                            "Range": "{:.2f}%",
+                            "Implied Vol": "{:.1f}",
+                            "Realized Vol": "{:.1f}",
+                            "Survival Prob": "{:.1f}%",
+                        }, na_rep="—")
+                        .map(_style_prob, subset=["Survival Prob"])
+                        .set_table_styles([
+                            {"selector": "th",
+                                "props": [("text-align", "center"),
+                                          ("font-weight", "600")]},
+                        ]))
+            st.dataframe(styled, use_container_width=True,
+                            hide_index=True,
+                            height=min(560, 38 * (len(df_scan) + 1)))
+
+            # ---- Scatter: vol richness vs survival prob (Goldman's
+            # 'DNT Probability vs Vol Richness' panel)
+            st.markdown("---")
+            st.markdown("##### Survival Prob vs Vol Richness")
+            st.caption(
+                "X-axis: theoretical survival probability. Y-axis: implied "
+                "minus realized vol (positive = vol trading rich). "
+                "**Upper-left** = low DNT prob AND rich vol — best "
+                "candidates to SELL the DNT. **Lower-right** = wide "
+                "corridor and cheap vol — least interesting."
+            )
+            df_sc = df_scan.copy()
+            df_sc["Vol Richness"] = (df_sc["Implied Vol"]
+                                       - df_sc["Realized Vol"])
+            df_sc = df_sc.dropna(subset=["Survival Prob", "Vol Richness"])
+            df_sc["Region"] = df_sc["Cross"].map(
+                lambda c: "EM Asia" if c in ASIA_EM_PAIRS else "G10"
+            )
+            fig_sc = px.scatter(
+                df_sc,
+                x="Survival Prob", y="Vol Richness",
+                color="Region", text="Cross",
+                hover_data={
+                    "Range": ":.2f",
+                    "Implied Vol": ":.1f",
+                    "Realized Vol": ":.1f",
+                    "Survival Prob": ":.1f",
+                    "Region": False,
+                },
+                color_discrete_map={"G10": "#1f77b4",
+                                       "EM Asia": "#2ca02c"},
+                height=460,
+            )
+            fig_sc.update_traces(textposition="top center",
+                                    marker=dict(size=11,
+                                                  line=dict(width=0.5,
+                                                              color="#333")))
+            fig_sc.add_hline(y=0, line_dash="dash",
+                                line_color="#888", opacity=0.5)
+            fig_sc.update_layout(
+                xaxis_title="Survival Probability (%)",
+                yaxis_title="Implied − Realized Vol (pts)",
+                margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom",
+                                y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_sc, use_container_width=True)
+
+            # ---- Drill-down: pair → spot + KO levels over time
+            st.markdown("---")
+            st.markdown("##### Drill-down — Spot and KO levels")
+
+            scan_pairs = df_scan["Cross"].tolist()
+            default_idx = (scan_pairs.index(pair)
+                              if pair in scan_pairs else 0)
+            drill_pair = st.selectbox(
+                "Pair", scan_pairs, index=default_idx,
+                key="dnt_drill_pair",
+            )
+
+            hist = _dnt_history_cached(folder, drill_pair, dnt_tenor,
+                                          dnt_lookback, float(dnt_widen),
+                                          em_pref)
+            if hist.empty:
+                st.warning(f"No spot history for {drill_pair}.")
+            else:
+                if lookback_days is None:
+                    hist_disp = hist
+                else:
+                    cutoff = (hist.index[-1]
+                                 - pd.Timedelta(days=lookback_days))
+                    hist_disp = hist[hist.index >= cutoff]
+
+                row = df_scan[df_scan["Cross"] == drill_pair].iloc[0]
+                cur_prob = float(row["Survival Prob"])
+
+                fig_h = go.Figure()
+                fig_h.add_trace(go.Scatter(
+                    x=hist_disp.index, y=hist_disp["Upper KO"],
+                    mode="lines", name="Upper KO",
+                    line=dict(color="#d62728", width=1.5, dash="dash"),
+                    hovertemplate="%{x|%Y-%m-%d}<br>U: %{y:.4f}<extra></extra>",
+                ))
+                fig_h.add_trace(go.Scatter(
+                    x=hist_disp.index, y=hist_disp["Lower KO"],
+                    mode="lines", name="Lower KO",
+                    line=dict(color="#d62728", width=1.5, dash="dash"),
+                    fill="tonexty",
+                    fillcolor="rgba(214, 39, 40, 0.08)",
+                    hovertemplate="%{x|%Y-%m-%d}<br>L: %{y:.4f}<extra></extra>",
+                ))
+                fig_h.add_trace(go.Scatter(
+                    x=hist_disp.index, y=hist_disp["Spot"],
+                    mode="lines", name="Spot",
+                    line=dict(color="#1f77b4", width=2),
+                    hovertemplate="%{x|%Y-%m-%d}<br>S: %{y:.4f}<extra></extra>",
+                ))
+                title = (f"{drill_pair} {dnt_tenor} DNT  ·  current "
+                            f"survival prob {cur_prob:.1f}%  ·  "
+                            f"trailing {lookback_label}")
+                fig_h.update_layout(
+                    title=title,
+                    xaxis_title="", yaxis_title="Level",
+                    height=400,
+                    margin=dict(l=10, r=10, t=50, b=10),
+                    hovermode="x unified",
+                    legend=dict(orientation="h", yanchor="bottom",
+                                  y=1.02, xanchor="right", x=1),
+                )
+                st.plotly_chart(fig_h, use_container_width=True)
+                st.caption(
+                    "Dashed bands = KO levels computed point-in-time "
+                    f"from {dnt_lookback}-BDay trailing spot range × "
+                    f"{dnt_widen:g}% widening. If the spot line breached "
+                    "the band in the past, a hypothetical DNT placed at "
+                    "that moment would have knocked out."
+                )
+
+            # ---- Download
+            st.markdown("---")
+            csv_bytes = df_scan.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇  Download screen (CSV)",
+                data=csv_bytes,
+                file_name=(f"dnt_screen_{dnt_tenor.lower()}_"
+                              f"{pd.Timestamp.today().strftime('%Y%m%d')}"
+                              ".csv"),
+                mime="text/csv",
+                key="dnt_download",
+            )
+
+
+# ============================================================================
+# TAB 7 — Binary 10:1 — Goldman 'Binary OTMS' (image 4)
+# ============================================================================
+# SCOPE: For each USD pair, solve for the strike where a 3m (configurable)
+# binary needs to be placed for a payout ratio of approximately 10:1
+# (premium $1, payout $10 if struck, breakeven prob ≈ 10%).
+#
+# Goldman shows 4 panels (USD/EUR × Call/Put × G10/EM). We have USD pairs
+# only, so we ship USD_CALL and USD_PUT side-by-side. Each shows G10 and
+# EM Asia in one table, sorted by tightness (smallest |% OTMS| on top).
+# Add EUR-cross pairs (EURJPY, EURGBP, EURCAD etc) to your data folder
+# to extend.
+#
+# Caveat: GS uses the full vol smile; we use ATM vol. For skewed pairs
+# expect ~0.5-1pp absolute discrepancy, ranking preserved.
+with tab_binary:
+    import plotly.express as px
+
+    from core.screens import scan_binary_otms, ASIA_EM_PAIRS
+
+    @st.cache_data(show_spinner="Scanning binary strikes…")
+    def _scan_binary_cached(folder: str,
+                              pairs: tuple[str, ...],
+                              tenor: str,
+                              direction: str,
+                              payout_ratio: float,
+                              prefer_em: str) -> pd.DataFrame:
+        return scan_binary_otms(folder, pairs, tenor=tenor,
+                                  direction=direction,
+                                  payout_ratio=payout_ratio,
+                                  prefer_em=prefer_em)
+
+    # Controls
+    cc1, cc2 = st.columns([1, 1])
+    with cc1:
+        bin_tenor = st.selectbox(
+            "Tenor", ["1M", "3M", "6M"], index=1, key="bin_tenor",
+        )
+    with cc2:
+        bin_ratio = st.number_input(
+            "Payout ratio (X:1)",
+            min_value=2.0, max_value=50.0, value=10.0, step=1.0,
+            help=("Higher ratio = farther OTMS strike. 10:1 means $1 "
+                    "premium pays $10 if struck (breakeven prob = 10%)."),
+            key="bin_ratio",
+        )
+
+    all_pairs = sorted(list_available_pairs(folder, "VOL_ATM"))
+    if not all_pairs:
+        st.warning("No VOL_ATM data in `_index.csv`.")
+    else:
+        em_pref = prefer if asia_em else "offshore"
+
+        df_call = _scan_binary_cached(folder, tuple(all_pairs),
+                                          bin_tenor, "USD_CALL",
+                                          float(bin_ratio), em_pref)
+        df_put = _scan_binary_cached(folder, tuple(all_pairs),
+                                        bin_tenor, "USD_PUT",
+                                        float(bin_ratio), em_pref)
+
+        st.markdown(
+            f"**Binary {bin_ratio:.0f}:1 Screen**  ·  {bin_tenor} cash-or-"
+            f"nothing options  ·  breakeven prob = {1/bin_ratio*100:.1f}%"
+        )
+        st.caption(
+            "% OTMS = (K/S − 1) × 100. Normalized = |% OTMS| ÷ realized "
+            "vol (a vol-adjusted distance — tighter strike in vol-time "
+            "units = more attractive). Goldman uses the smile; we use "
+            "ATM. Add EUR-cross pairs to extend to the EUR side."
+        )
+
+        def _style_norm(v):
+            """Green for small (tight strike), red for large."""
+            if pd.isna(v):
+                return ""
+            t = max(0.0, min(1.0, (float(v) - 0.3) / 1.0))
+            if t < 0.5:
+                x = t / 0.5
+                r = int(40 + (255 - 40) * x)
+                g = int(160 + (220 - 160) * x)
+                b = int(40 + (130 - 40) * x)
+            else:
+                x = (t - 0.5) / 0.5
+                r = int(255 + (220 - 255) * x)
+                g = int(220 + (80 - 220) * x)
+                b = int(130 + (80 - 130) * x)
+            return (f"background-color: rgb({r},{g},{b}); "
+                      "color: #1a1a1a; text-align: right; font-weight: 600;")
+
+        def _fmt_px_bin(v, pair):
+            if pd.isna(v):
+                return "—"
+            if pair in ("USDJPY", "USDKRW"):
+                return f"{v:,.2f}"
+            if pair == "USDIDR":
+                return f"{v:,.0f}"
+            return f"{v:.4f}"
+
+        # ---- Two columns: Call panel | Put panel
+        col_call, col_put = st.columns(2)
+
+        with col_call:
+            st.markdown("##### USD Calls (USD strengthens)")
+            if df_call.empty:
+                st.info("No data.")
+            else:
+                # Region tagging for display
+                df_call_disp = df_call.copy()
+                df_call_disp["Region"] = df_call_disp["Pair"].map(
+                    lambda p: "EM" if p in ASIA_EM_PAIRS else "G10")
+                df_call_disp["Spot"] = df_call_disp.apply(
+                    lambda r: _fmt_px_bin(r["Spot"], r["Pair"]), axis=1)
+                df_call_disp["Strike"] = df_call_disp.apply(
+                    lambda r: _fmt_px_bin(r["Strike"], r["Pair"]), axis=1)
+
+                styled = (df_call_disp[["Currency", "Region", "Spot",
+                                          "Strike", "% OTMS", "Normalized"]]
+                            .style
+                            .format({
+                                "% OTMS": "{:+.2f}%",
+                                "Normalized": "{:.2f}x",
+                            }, na_rep="—")
+                            .map(_style_norm, subset=["Normalized"])
+                            .set_table_styles([
+                                {"selector": "th",
+                                  "props": [("text-align", "center"),
+                                              ("font-weight", "600")]},
+                            ]))
+                st.dataframe(styled, use_container_width=True,
+                                hide_index=True,
+                                height=min(560, 38 * (len(df_call) + 1)))
+
+        with col_put:
+            st.markdown("##### USD Puts (USD weakens)")
+            if df_put.empty:
+                st.info("No data.")
+            else:
+                df_put_disp = df_put.copy()
+                df_put_disp["Region"] = df_put_disp["Pair"].map(
+                    lambda p: "EM" if p in ASIA_EM_PAIRS else "G10")
+                df_put_disp["Spot"] = df_put_disp.apply(
+                    lambda r: _fmt_px_bin(r["Spot"], r["Pair"]), axis=1)
+                df_put_disp["Strike"] = df_put_disp.apply(
+                    lambda r: _fmt_px_bin(r["Strike"], r["Pair"]), axis=1)
+
+                styled = (df_put_disp[["Currency", "Region", "Spot",
+                                          "Strike", "% OTMS", "Normalized"]]
+                            .style
+                            .format({
+                                "% OTMS": "{:+.2f}%",
+                                "Normalized": "{:.2f}x",
+                            }, na_rep="—")
+                            .map(_style_norm, subset=["Normalized"])
+                            .set_table_styles([
+                                {"selector": "th",
+                                  "props": [("text-align", "center"),
+                                              ("font-weight", "600")]},
+                            ]))
+                st.dataframe(styled, use_container_width=True,
+                                hide_index=True,
+                                height=min(560, 38 * (len(df_put) + 1)))
+
+        # ---- Scatter: Calls vs Puts asymmetry
+        # Plots (OTMS_call + OTMS_put)/2 vs (OTMS_call - |OTMS_put|).
+        # Positive Y = call needs to be farther OTMS than put (RR skewed
+        # to USD calls = market prices USD upside as more likely).
+        if not df_call.empty and not df_put.empty:
+            st.markdown("---")
+            st.markdown("##### Call vs Put Skew")
+            st.caption(
+                "X-axis: average distance to 10:1 strike (lower = vol "
+                "is cheaper to buy upside). Y-axis: call OTMS minus "
+                "|put OTMS| (positive = USD calls need to be farther OTMS, "
+                "meaning the market prices USD downside as more likely "
+                "= bearish-USD risk-reversal)."
+            )
+            merged = df_call[["Currency", "Pair", "% OTMS"]].merge(
+                df_put[["Pair", "% OTMS"]],
+                on="Pair", suffixes=("_call", "_put"),
+            )
+            merged["AvgDist"] = (merged["% OTMS_call"]
+                                   + merged["% OTMS_put"].abs()) / 2.0
+            merged["Skew"] = (merged["% OTMS_call"]
+                                + merged["% OTMS_put"])  # put is neg, so this = call - |put|
+            merged["Region"] = merged["Pair"].map(
+                lambda p: "EM Asia" if p in ASIA_EM_PAIRS else "G10")
+
+            fig_sc = px.scatter(
+                merged, x="AvgDist", y="Skew",
+                color="Region", text="Currency",
+                color_discrete_map={"G10": "#1f77b4",
+                                       "EM Asia": "#2ca02c"},
+                height=420,
+            )
+            fig_sc.update_traces(textposition="top center",
+                                    marker=dict(size=11,
+                                                  line=dict(width=0.5,
+                                                              color="#333")))
+            fig_sc.add_hline(y=0, line_dash="dash",
+                                line_color="#888", opacity=0.5)
+            fig_sc.update_layout(
+                xaxis_title="Avg distance to 10:1 strike (% OTMS)",
+                yaxis_title="Call OTMS − |Put OTMS| (skew)",
+                margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom",
+                                y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_sc, use_container_width=True)
+
+        # ---- Download
+        st.markdown("---")
+        d1, d2 = st.columns(2)
+        with d1:
+            if not df_call.empty:
+                csv_bytes = df_call.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇  Calls (CSV)", data=csv_bytes,
+                    file_name=(f"binary_calls_{bin_tenor.lower()}_"
+                                  f"{pd.Timestamp.today().strftime('%Y%m%d')}"
+                                  ".csv"),
+                    mime="text/csv",
+                    key="bin_call_download",
+                )
+        with d2:
+            if not df_put.empty:
+                csv_bytes = df_put.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇  Puts (CSV)", data=csv_bytes,
+                    file_name=(f"binary_puts_{bin_tenor.lower()}_"
+                                  f"{pd.Timestamp.today().strftime('%Y%m%d')}"
+                                  ".csv"),
+                    mime="text/csv",
+                    key="bin_put_download",
+                )
 
 
 # -----------------------------------------------------------------------------

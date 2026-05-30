@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 import streamlit as st
 
-from shared.pages import LIVE_PAGES
+from shared.pages import pages_by_section
 from shared.style import inject_base_css
 
 
@@ -31,7 +31,9 @@ inject_base_css()
 
 # Landing-page-only styling. The card-body class deliberately uses
 # flex layout so cards in the same row stay the same height even when
-# descriptions vary in length.
+# descriptions vary in length. Section headers are a thin styled
+# block above each card row, designed to feel like a divider rather
+# than a heavy heading.
 st.markdown(
     """
     <style>
@@ -49,6 +51,29 @@ st.markdown(
           font-size: 1.0rem;
           color: #94a3b8;
           margin: 0;
+      }
+      .fx-section {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin: 1.5rem 0 0.6rem 0;
+      }
+      .fx-section-label {
+          font-size: 0.78rem;
+          font-weight: 600;
+          letter-spacing: 1.2px;
+          text-transform: uppercase;
+          color: #94a3b8;
+          white-space: nowrap;
+      }
+      .fx-section-rule {
+          flex: 1;
+          height: 1px;
+          background: linear-gradient(
+              to right,
+              rgba(148,163,184,0.35) 0%,
+              rgba(148,163,184,0.0)  100%
+          );
       }
       .fx-card-icon  { font-size: 2rem; line-height: 1; margin-bottom: 4px; }
       .fx-card-title {
@@ -91,35 +116,45 @@ st.markdown(
 )
 
 
-# Card grid — 2 columns wide, as many rows as needed to fit LIVE_PAGES.
-# Pairs Streamlit's bordered container (for the box) with raw HTML inside
-# it (for content styling). The "Open →" button is a real Streamlit
-# button so st.switch_page can fire.
-n_pages = len(LIVE_PAGES)
-n_rows = (n_pages + 1) // 2   # ceil(n_pages / 2)
-slots: list = []
-for _ in range(n_rows):
-    slots.extend(st.columns(2, gap="medium"))
+# Card grid grouped by section. Within each section, cards lay out in
+# rows of 2. Section headers act as visual dividers between groups so
+# the page reads top-to-bottom as Portfolio → Dashboards → Pricers →
+# Backtest → Workflow.
+for section_name, pages in pages_by_section().items():
+    st.markdown(
+        f"""
+        <div class="fx-section">
+          <div class="fx-section-label">{section_name}</div>
+          <div class="fx-section-rule"></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-for slot, page in zip(slots, LIVE_PAGES):
-    with slot:
-        with st.container(border=True):
-            st.markdown(
-                f"""
-                <div class="fx-card-icon">{page.icon}</div>
-                <div class="fx-card-title">{page.title}</div>
-                <div class="fx-card-tag">{page.card_tag}</div>
-                <div class="fx-card-body">{page.card_body}</div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button(
-                "Open →",
-                key=f"open_{page.title}",
-                use_container_width=True,
-                type="primary",
-            ):
-                st.switch_page(page.path)
+    n_rows = (len(pages) + 1) // 2  # ceil(n / 2)
+    slots: list = []
+    for _ in range(n_rows):
+        slots.extend(st.columns(2, gap="medium"))
+
+    for slot, page in zip(slots, pages):
+        with slot:
+            with st.container(border=True):
+                st.markdown(
+                    f"""
+                    <div class="fx-card-icon">{page.icon}</div>
+                    <div class="fx-card-title">{page.title}</div>
+                    <div class="fx-card-tag">{page.card_tag}</div>
+                    <div class="fx-card-body">{page.card_body}</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "Open →",
+                    key=f"open_{page.title}",
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    st.switch_page(page.path)
 
 
 # Footer
