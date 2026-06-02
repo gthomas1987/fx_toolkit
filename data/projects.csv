@@ -1,8 +1,27 @@
-id,title,description,type,priority,status,date_requested,due_date,est_hours,actual_hours,progress_pct,notes,related_page,created_at,updated_at
-77d9ffc6a0b0,Get accurate 3 month 25D call and 25% digi call,Could be different due to skew. Fix and extend to other maturities/delta,Ad-hoc,Urgent,In Progress,2026-05-30,2026-07-31,10.0,20.0,29.0,,,2026-05-30,2026-05-30
-2c2a21d3eb1a,Realized correlation matrix across major FX pairs and Equity indices,,Ad-hoc,Med,Backlog,2026-05-30,,20.0,0.0,31.0,,,2026-05-30,2026-05-30
-8d07d9334679,Calculate implied correlation for EUR and JPY through EURXXX and XXXJPY implied vol,,Ad-hoc,Med,Backlog,2026-05-30,,20.0,0.0,0.0,,,2026-05-30,2026-05-30
-08ab244db1da,"Investigate ways to auto-classify assets into ""Rangey"" or ""Trendy"" for last 6-12 months",,Ad-hoc,Med,Backlog,2026-05-30,,30.0,0.0,0.0,,,2026-05-30,2026-05-30
-6f15af121068,Study https://en.macromicro.me,,Ad-hoc,Med,Backlog,2026-05-30,,30.0,0.0,0.0,,,2026-05-30,2026-05-30
-040069b18a85,Dashboard to do Cluster Analysis on  two currency pairs,,Ad-hoc,Med,Review,2026-05-30,,50.0,0.0,0.0,,,2026-05-30,2026-05-30
-34fef3b4ad34,Replicate FXpresso,,Ad-hoc,Med,Backlog,2026-05-30,,50.0,0.0,0.0,,,2026-05-30,2026-05-30
+id,title,description,type,priority,status,date_requested,due_date,est_hours,actual_hours,progress_pct,notes,related_page,created_at,updated_at,last_chased_at,chase_count
+1,"Set up dev environment, bloomberg data connectivity and software publishing lifecycle",,Data,Med,Backlog,2026-02-06,,20,0,0,,,2026-05-30,2026-06-02,,
+2,"Connect to live positions for PnL, Build Risk Monitoring Toolset and Scenario Dashboard","Will prioritize building live pricing, pnl and risks for existing portfolio",Data,Med,Backlog,2026-02-06,,40,0,0,,,2026-05-30,2026-05-30,,
+3,Build Vol History Dashboard and replicate FXpresso,,Data,Med,Backlog,2026-02-06,,30,6,20,,,2026-05-30,2026-05-30,,
+4,Build vanilla and exotic option pricers,Prioritize option types as required,Pricer,Med,Backlog,2026-02-06,,30,0,0,,,2026-05-30,2026-05-30,,
+5,Dual asset pricer (Equity & FX),"Equity being a drift asset, a hybrid that uses equity as a primary asset for a 20% digi, and FX range trade as a funder for 20% worth of digital spread, can combine as a 6-8% structure that can theoretically offer 12x risk/reward",Pricer,Med,Backlog,2026-02-06,,10,0,0,,,2026-05-30,2026-05-30,,
+6,"Backtest framework for options (vanilla, Worst-of, Dual Digi etc)",,Backtest,Med,Backlog,2026-02-06,,50,0,0,,,2026-05-30,2026-05-30,,
+7,Backtest portfolio of options,,Backtest,Med,Backlog,2026-02-06,,50,0,0,,,2026-05-30,2026-05-30,,
+8,Get accurate 3 month 25D call and 25% digi call,Could be different due to skew. Fix and extend to other maturities/delta,Research,Med,Backlog,2026-02-06,,20,0,0,,,2026-02-06,2026-02-06,,
+9,Compare realized skew to implied skew,Need to research this and add to Vol Dashboard,Research,Med,Backlog,2026-02-06,,60,0,0,,,2026-02-06,2026-02-06,,
+10,Realized correlation matrix across major FX pairs and Equity indices,,Research,Med,Backlog,2026-02-06,,20,0,0,,,2026-02-06,2026-02-06,,
+11,Calculate implied correlation for EUR and JPY through EURXXX and XXXJPY implied vol,,Research,Med,Backlog,2026-02-06,,60,0,0,,,2026-02-06,2026-02-06,,
+12,"Investigate ways to auto-classify assets into ""Rangey"" or ""Trendy"" for last 6-12 months",,Research,Med,Backlog,2026-02-06,,60,0,0,,,2026-02-06,2026-02-06,,
+13,Dashboard to do Cluster Analysis on  two currency pairs,this is to incorporate asian FX idiosyncrasies and line in the sand to better assess strikes and KO levels.,Research,Med,Backlog,2026-02-06,,60,0,0,,,2026-02-06,2026-06-02,,
+14,(BIG PICTURE) Systematically apply highly leveraged structures to increase portfolio asymmetry,Combine a) levered structures with b) Asian FX idiosyncrasies (Cluster Analysis Project) with c) Law of large numbers with d) Vol Surface Structure,Research,Med,Backlog,2026-02-06,,50,0,0,,,2026-02-06,2026-02-06,,
+15,(BIG PICTURE) Build Go-to trade expressions based on Trade Setups,,Research,Med,Backlog,2026-02-06,,300,0,0,,,2026-02-06,2026-02-06,,
+16,Currency Screener for best candidates for dual digi / worst-of (vanilla and EKO),need to think about how two assets drift together (in same direction) but are not as correlated (day to day co-movements are not as high).,Research,Med,Backlog,2026-02-06,,300,0,0,,,2026-02-06,2026-02-06,,
+17,Country Dashboard,Feed in fundamental data across countries to get snapshot overview. Study https://en.macromicro.me,Data,Med,Backlog,2026-02-06,,0,0,0,,,2026-02-06,2026-02-06,,
+18,Create workflows around labor intensive work,"A) getting USDINR fwd expiry by week from banks (highlight days with big expiry)
+B) USDIDR DNDF (highlight days with big expiry)
+C) MSCI quarterly rebalancing
+D) Korean retail daily foreign equity purchases/sales
+E) Southbound flows
+F) ETF gamma profile
+G) dividend schedule across countries
+H) major option barriers from banks
+I) gamma profile in key currencies",Data,Med,Backlog,2026-02-06,,0,0,0,,,2026-02-06,2026-02-06,,

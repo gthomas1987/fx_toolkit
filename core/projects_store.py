@@ -51,10 +51,17 @@ COLUMNS = [
     "id", "title", "description", "type", "priority", "status",
     "date_requested", "due_date", "est_hours", "actual_hours",
     "progress_pct", "notes", "related_page", "created_at", "updated_at",
+    # Chase / update-request tracking. Recorded by chase_project().
+    # Backward-compatible: load_projects() tolerates these missing in
+    # older CSVs and fills them with NaN / NaT.
+    "last_chased_at", "chase_count",
 ]
 
-DATE_COLS = ["date_requested", "due_date", "created_at", "updated_at"]
-NUM_COLS = ["est_hours", "actual_hours", "progress_pct"]
+DATE_COLS = [
+    "date_requested", "due_date", "created_at", "updated_at",
+    "last_chased_at",
+]
+NUM_COLS = ["est_hours", "actual_hours", "progress_pct", "chase_count"]
 
 
 def _empty_df() -> pd.DataFrame:
@@ -75,7 +82,13 @@ def load_projects() -> pd.DataFrame:
             df[col] = pd.NA
     df = df[COLUMNS]
     for c in DATE_COLS:
-        df[c] = pd.to_datetime(df[c], errors="coerce")
+        # Force ns precision uniformly. pd.to_datetime on a column
+        # that's all-NaN (typical for newly-added DATE_COLS in older
+        # CSVs) returns datetime64[s], which then refuses microsecond-
+        # precision assignments like pd.Timestamp(datetime.now()).
+        # Explicitly upcasting to ns makes writes work regardless of
+        # whether the source column had data or not.
+        df[c] = pd.to_datetime(df[c], errors="coerce").astype("datetime64[ns]")
     for c in NUM_COLS:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df["title"] = df["title"].fillna("Untitled").astype(str)
@@ -175,6 +188,56 @@ def move_status(project_id: str, direction: int) -> None:
     new_pos = min(max(STATUSES.index(cur) + direction, 0), len(STATUSES) - 1)
     df.at[idx, "status"] = STATUSES[new_pos]
     df.at[idx, "updated_at"] = pd.Timestamp(datetime.now())
+    save_projects(df)
+
+
+def change_priority(project_id: str, direction: int) -> None:
+    """Bump priority one step.
+
+    direction=-1 → more urgent (e.g. Med → High); direction=+1 → less
+    urgent (e.g. High → Med). Clamps at the ends of PRIORITIES so
+    Urgent stays Urgent on further bumps up and Low stays Low on
+    further bumps down. Falls back to "Med" if the current label
+    isn't one of the canonical four, which keeps the function safe
+    against any hand-edited CSVs that slipped in a non-standard value.
+    """
+    df = load_projects()
+    mask = df["id"] == project_id
+    if not mask.any():
+        return
+    idx = df.index[mask][0]
+    cur = df.at[idx, "priority"]
+    if cur not in PRIORITIES:
+        cur = "Med"
+    new_pos = min(
+        max(PRIORITIES.index(cur) + direction, 0),
+        len(PRIORITIES) - 1,
+    )
+    df.at[idx, "priority"] = PRIORITIES[new_pos]
+    df.at[idx, "updated_at"] = pd.Timestamp(datetime.now())
+    save_projects(df)
+
+
+def chase_project(project_id: str) -> None:
+    """Record a chase / update-request event on a project.
+
+    Bumps `chase_count` by 1 and sets `last_chased_at` to now. Used
+    by the table-view Chase button so the user can keep track of
+    when they last pinged the PM about a project (and avoid pinging
+    them three times in a row).
+    """
+    df = load_projects()
+    mask = df["id"] == project_id
+    if not mask.any():
+        return
+    idx = df.index[mask][0]
+    now = pd.Timestamp(datetime.now())
+    df.at[idx, "last_chased_at"] = now
+    cur_count = df.at[idx, "chase_count"]
+    df.at[idx, "chase_count"] = (
+        1 if pd.isna(cur_count) else int(cur_count) + 1
+    )
+    df.at[idx, "updated_at"] = now
     save_projects(df)
 
 
